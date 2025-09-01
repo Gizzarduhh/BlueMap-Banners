@@ -7,6 +7,8 @@ import de.bluecolored.bluemap.api.gson.MarkerGson;
 import de.bluecolored.bluemap.api.markers.MarkerSet;
 import de.bluecolored.bluemap.api.markers.POIMarker;
 import me.Gizzarduhh.blueMapBanners.listener.BannerListener;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.NamespacedKey;
 import org.bukkit.block.Banner;
 import org.bukkit.block.Block;
@@ -127,9 +129,10 @@ public final class BlueMapBanners extends JavaPlugin {
         });
 
         if (config.getBoolean("messages.enabled"))
-            player.sendMessage(
-                    config.getString("messages.+marker", "%banner% added to BlueMap!")
-                    .replace("%banner%", '"' + name + '"'));
+            player.sendMessage(Component
+                    .text(config.getString("messages.+marker", "%banner% added to BlueMap!")
+                            .replace("%banner%", name))
+                    .color(NamedTextColor.GRAY));
     }
 
     public void removeBannerMarker(Block banner, Player player) {
@@ -145,20 +148,30 @@ public final class BlueMapBanners extends JavaPlugin {
             MarkerSet markerSet = blueMapMap.get().getMarkerSets().get(markerSetId);
             if (markerSet == null) return;
 
-            // Get marker UUID through data container
+            // Check if banner has marker id
             if (banner.getState() instanceof Banner bannerState) {
                 PersistentDataContainer pdc = bannerState.getPersistentDataContainer();
+                if (!pdc.has(markerIdKey)) return;
 
-                // If banner has a marker, remove it
-                if (pdc.has(markerIdKey)) {
-                    String markerId = pdc.get(markerIdKey, PersistentDataType.STRING);
-                    String name = markerSet.get(markerId).getLabel();
+                // Remove marker if it exists
+                String markerId = pdc.get(markerIdKey, PersistentDataType.STRING);
+                if (markerSet.get(markerId) != null){
+                    String name = '"' + markerSet.get(markerId).getLabel() + '"';
                     markerSet.remove(markerId);
 
-                    if (config.getBoolean("messages.enabled"))
-                        player.sendMessage(
-                                config.getString("messages.-marker", "%banner% removed from BlueMap!")
-                                        .replace("%banner%", '"' + name + '"'));
+                    if (!config.getBoolean("messages.enabled")) return;
+
+                    if (player != null) {
+                        player.sendMessage(Component
+                                .text(config.getString("messages.-marker", "%banner% removed from BlueMap!")
+                                        .replace("%banner%", name))
+                                .color(NamedTextColor.GRAY));
+                    } else {
+                        getServer().broadcast(Component
+                                .text(config.getString("messages.explode", "The %banner% banner exploded!")
+                                        .replace("%banner%", name))
+                                .color(NamedTextColor.GRAY));
+                    }
                 }
             }
         });
@@ -204,6 +217,7 @@ public final class BlueMapBanners extends JavaPlugin {
 
                 try (FileReader reader = new FileReader(markerFile)) {
                     MarkerSet markerSet = MarkerGson.INSTANCE.fromJson(reader, MarkerSet.class);
+                    if (markerSet == null) continue;    // Skip empty marker sets
 
                     markerSet.setDefaultHidden(config.getBoolean("markers.hidden"));
                     map.getMarkerSets().put(markerSetId, markerSet);

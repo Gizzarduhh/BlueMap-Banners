@@ -3,10 +3,13 @@ package me.Gizzarduhh.blueMapBanners.listener;
 import me.Gizzarduhh.blueMapBanners.BlueMapBanners;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
 
 public class BannerListener implements Listener {
 
@@ -34,10 +37,27 @@ public class BannerListener implements Listener {
 
     @EventHandler
     public void onBannerBreak(BlockBreakEvent event) {
-        // Only handle Banners
         Block block = event.getBlock();
-        if (!block.getType().name().endsWith("_BANNER")) return;
+        Player player = event.getPlayer();
+        if (block.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(block, player);
 
-        plugin.removeBannerMarker(block, event.getPlayer());
+        // Check Adjacent Blocks
+        for (BlockFace face : BlockFace.values()) {
+            Block relative = block.getRelative(face);
+            if (relative.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(relative, player);
+        }
+    }
+
+    @EventHandler
+    public void onBannerExplode(EntityExplodeEvent event) {
+        for (Block block : event.blockList()) {
+            if (block.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(block, null);
+
+            // Check Adjacent Blocks
+            for (BlockFace face : BlockFace.values()) {
+                Block relative = block.getRelative(face);
+                if (relative.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(relative, null);
+            }
+        }
     }
 }
