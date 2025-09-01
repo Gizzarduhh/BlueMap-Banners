@@ -7,20 +7,26 @@ import de.bluecolored.bluemap.api.gson.MarkerGson;
 import de.bluecolored.bluemap.api.markers.MarkerSet;
 import de.bluecolored.bluemap.api.markers.POIMarker;
 import me.Gizzarduhh.blueMapBanners.listener.BannerListener;
+import org.bukkit.NamespacedKey;
+import org.bukkit.block.Banner;
 import org.bukkit.block.Block;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import javax.imageio.ImageIO;
 import java.io.*;
 import java.util.Collection;
 import java.util.Optional;
+import java.util.UUID;
 
 
 public final class BlueMapBanners extends JavaPlugin {
 
-    private static final String markerSetId = "bm-banners";
+    private final NamespacedKey markerIdKey = new NamespacedKey(this,"markerId");
+    private final String markerSetId = "bm-banners";
     private Collection<BlueMapMap> blueMapMaps;
     private Configuration config;
 
@@ -41,7 +47,6 @@ public final class BlueMapBanners extends JavaPlugin {
             reloadConfig();
             config = getConfig();
 
-            saveResourcesToBlueMap();
             loadBannerMarkers();
         });
 
@@ -56,49 +61,39 @@ public final class BlueMapBanners extends JavaPlugin {
         // Plugin shutdown logic
     }
 
-    public void saveResourcesToBlueMap() {
-        getLogger().info("Saving assets...");
-        BlueMapAPI.getInstance().ifPresent(api -> {
-
-            for (BlueMapMap map : blueMapMaps) {
-                AssetStorage assetStorage = map.getAssetStorage();
-
-                String[] colors = {
-                        "black","blue","brown","cyan","gray","green","light_blue","light_gray",
-                        "lime","magenta","orange","pink","purple","red","white","yellow"
-                };
-                for (String color : colors) {
-                    String asset = "banners/" + color + "_banner.png";
-
-                    try (InputStream in = getResource(asset)) {
-                        if (in == null) {
-                            getLogger().warning("Missing resource in JAR: " + asset);
-                            continue;
-                        }
-
-                        try (OutputStream out = assetStorage.writeAsset(asset)) {
-                            ImageIO.write(ImageIO.read(in), "png", out);
-                        }
-                    } catch (IOException ex) {
-                        // handle io-exception
-                        getLogger().severe("Unable to write asset: " + ex.getMessage());
-
-                    }
-                }
-            }
-        });
-    }
-
     public void addBannerMarker(Block banner, String name, Player player) {
         BlueMapAPI.getInstance().ifPresent(api -> {
-            String asset = "banners/" + banner.getType()
-                    .name().toLowerCase().replace("_wall","") + ".png";
-
             // Get BlueMap map banner was placed within
             Optional<BlueMapMap> blueMapMap = api.getMap(banner.getWorld().getName());
             if (blueMapMap.isEmpty()) {
                 getLogger().severe("Error adding banner, " + name + ": BlueMap world not found.");
                 return;
+            }
+
+            // Create UUID and store it on banner state data container
+            String markerId = "bm-banner-" + UUID.randomUUID();
+            if (banner.getState() instanceof Banner bannerState) {
+                bannerState.getPersistentDataContainer().set(markerIdKey, PersistentDataType.STRING, markerId);
+                bannerState.update();
+            } else {
+                getLogger().severe("Error adding banner, failed to get banners block state.");
+                return;
+            }
+
+            // Write asset to storage if not in storage
+            AssetStorage assetStorage = blueMapMap.get().getAssetStorage();
+            String asset = "banners/" + banner.getType().name()
+                    .toLowerCase()
+                    .replace("_wall","") + ".png";
+            try (InputStream in = getResource(asset)) {
+                if (in != null && !assetStorage.assetExists(asset)) {
+                    try (OutputStream out = assetStorage.writeAsset(asset)) {
+                        ImageIO.write(ImageIO.read(in), "png", out);
+                    }
+                }
+            } catch (IOException ex) {
+                // handle io-exception
+                getLogger().severe("Unable to write asset: " + ex.getMessage());
             }
 
             // Create bannerMarker
@@ -114,11 +109,9 @@ public final class BlueMapBanners extends JavaPlugin {
                     .maxDistance(1000)
                     .build();
 
-            // Get existing markerSet from map or create one
-            MarkerSet markerSet;
-            if (blueMapMap.get().getMarkerSets().get(markerSetId) != null) {
-                markerSet = blueMapMap.get().getMarkerSets().get(markerSetId);
-            } else {
+            // Get existing markerSet from map or create new
+            MarkerSet markerSet = blueMapMap.get().getMarkerSets().get(markerSetId);
+            if (markerSet == null) {
                 markerSet = MarkerSet.builder()
                         .defaultHidden(config.getBoolean("markers.hidden"))
                         .label("Banners")
@@ -127,17 +120,10 @@ public final class BlueMapBanners extends JavaPlugin {
 
             // Add bannerMarker to markerSet
             markerSet.getMarkers()
-                    .put("bm-banner"
-                            + "-X" + String.valueOf(banner.getX()).replace('-','N')
-                            + "-Y" + String.valueOf(banner.getY()).replace('-','N')
-                            + "-Z" + String.valueOf(banner.getZ()).replace('-','N'), bannerMarker);
+                    .put(markerId, bannerMarker);
 
-            // Add markerSet
-            api.getWorld(player.getWorld()).ifPresent(world -> {
-                for (BlueMapMap map : world.getMaps()) {
-                    map.getMarkerSets().put(markerSetId, markerSet);
-                }
-            });
+            // Add markerSet to map
+            blueMapMap.get().getMarkerSets().put(markerSetId, markerSet);
         });
 
         if (config.getBoolean("messages.enabled"))
@@ -159,18 +145,21 @@ public final class BlueMapBanners extends JavaPlugin {
             MarkerSet markerSet = blueMapMap.get().getMarkerSets().get(markerSetId);
             if (markerSet == null) return;
 
-            // Remove the banners marker if it exists
-            String markerId = "bm-banner"
-                    + "-X" + String.valueOf(banner.getX()).replace('-','N')
-                    + "-Y" + String.valueOf(banner.getY()).replace('-','N')
-                    + "-Z" + String.valueOf(banner.getZ()).replace('-','N');
-            if (markerSet.get(markerId) != null) {
-                String name = markerSet.get(markerId).getLabel();
-                markerSet.remove(markerId);
-                if (config.getBoolean("messages.enabled"))
-                    player.sendMessage(
-                            config.getString("messages.-marker", "%banner% removed from BlueMap!")
-                                    .replace("%banner%", '"' + name + '"'));
+            // Get marker UUID through data container
+            if (banner.getState() instanceof Banner bannerState) {
+                PersistentDataContainer pdc = bannerState.getPersistentDataContainer();
+
+                // If banner has a marker, remove it
+                if (pdc.has(markerIdKey)) {
+                    String markerId = pdc.get(markerIdKey, PersistentDataType.STRING);
+                    String name = markerSet.get(markerId).getLabel();
+                    markerSet.remove(markerId);
+
+                    if (config.getBoolean("messages.enabled"))
+                        player.sendMessage(
+                                config.getString("messages.-marker", "%banner% removed from BlueMap!")
+                                        .replace("%banner%", '"' + name + '"'));
+                }
             }
         });
     }
