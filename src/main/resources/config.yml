@@ -1,0 +1,18 @@
+#################################################
+# BlueMap Banners configuration                 #
+#################################################
+
+# Use %banner% and %players% to replace with respective names
+markers:
+  label: "%banner%"
+  detail: "%banner%\n - %player%"
+  hidden: false
+  max_distance: 1000
+  min_distance: 0
+
+# Use %banner% to replace with banner name
+messages:
+  enabled: true
+  +marker: "§7%banner% added to BlueMap!"
+  -marker: "§7%banner% removed from BlueMap!"
+

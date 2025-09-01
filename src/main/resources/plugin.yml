@@ -1,0 +1,6 @@
+name: BlueMap-Banners
+version: '1.0-SNAPSHOT'
+main: me.Gizzarduhh.blueMapBanners.BlueMapBanners
+author: [Gizzarduhh]
+api-version: '1.21'
+depend: [BlueMap]
