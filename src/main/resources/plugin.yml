@@ -1,5 +1,5 @@
 name: BlueMap-Banners
-version: '1.0'
+version: '1.1-SNAPSHOT'
 main: me.Gizzarduhh.blueMapBanners.BlueMapBanners
 author: Gizzarduhh
 api-version: '1.21'

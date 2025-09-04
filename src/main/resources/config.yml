@@ -14,4 +14,3 @@ messages:
   +marker: "%banner% added to BlueMap!"
   -marker: "%banner% removed from BlueMap!"
   explode: "The %banner% banner exploded!"
-

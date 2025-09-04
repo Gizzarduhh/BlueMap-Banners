@@ -11,7 +11,6 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.NamespacedKey;
 import org.bukkit.block.Banner;
-import org.bukkit.block.Block;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.entity.Player;
 import org.bukkit.persistence.PersistentDataContainer;
@@ -63,7 +62,7 @@ public final class BlueMapBanners extends JavaPlugin {
         // Plugin shutdown logic
     }
 
-    public void addBannerMarker(Block banner, String name, Player player) {
+    public void addBannerMarker(Banner banner, String name, Player player) {
         BlueMapAPI.getInstance().ifPresent(api -> {
             // Get BlueMap map banner was placed within
             Optional<BlueMapMap> blueMapMap = api.getMap(banner.getWorld().getName());
@@ -72,15 +71,10 @@ public final class BlueMapBanners extends JavaPlugin {
                 return;
             }
 
-            // Create UUID and store it on banner state data container
+            // Create UUID and store it in banner data container
             String markerId = "bm-banner-" + UUID.randomUUID();
-            if (banner.getState() instanceof Banner bannerState) {
-                bannerState.getPersistentDataContainer().set(markerIdKey, PersistentDataType.STRING, markerId);
-                bannerState.update();
-            } else {
-                getLogger().severe("Error adding banner, failed to get banners block state.");
-                return;
-            }
+            banner.getPersistentDataContainer().set(markerIdKey, PersistentDataType.STRING, markerId);
+            banner.update();
 
             // Write asset to storage if not in storage
             AssetStorage assetStorage = blueMapMap.get().getAssetStorage();
@@ -135,7 +129,7 @@ public final class BlueMapBanners extends JavaPlugin {
                     .color(NamedTextColor.GRAY));
     }
 
-    public void removeBannerMarker(Block banner, Player player) {
+    public void removeBannerMarker(Banner banner, Player player) {
         BlueMapAPI.getInstance().ifPresent(api -> {
             // Get BlueMap map
             Optional<BlueMapMap> blueMapMap = api.getMap(banner.getWorld().getName());
@@ -149,29 +143,26 @@ public final class BlueMapBanners extends JavaPlugin {
             if (markerSet == null) return;
 
             // Check if banner has marker id
-            if (banner.getState() instanceof Banner bannerState) {
-                PersistentDataContainer pdc = bannerState.getPersistentDataContainer();
-                if (!pdc.has(markerIdKey)) return;
+            PersistentDataContainer pdc = banner.getPersistentDataContainer();
+            if (!pdc.has(markerIdKey)) return;
 
-                // Remove marker if it exists
-                String markerId = pdc.get(markerIdKey, PersistentDataType.STRING);
-                if (markerSet.get(markerId) != null){
-                    String name = '"' + markerSet.get(markerId).getLabel() + '"';
-                    markerSet.remove(markerId);
+            // Remove marker if it exists
+            String markerId = pdc.get(markerIdKey, PersistentDataType.STRING);
+            if (markerSet.get(markerId) != null){
+                String name = '"' + markerSet.get(markerId).getLabel() + '"';
+                markerSet.remove(markerId);
 
-                    if (!config.getBoolean("messages.enabled")) return;
-
-                    if (player != null) {
-                        player.sendMessage(Component
-                                .text(config.getString("messages.-marker", "%banner% removed from BlueMap!")
-                                        .replace("%banner%", name))
-                                .color(NamedTextColor.GRAY));
-                    } else {
-                        getServer().broadcast(Component
-                                .text(config.getString("messages.explode", "The %banner% banner exploded!")
-                                        .replace("%banner%", name))
-                                .color(NamedTextColor.GRAY));
-                    }
+                if (!config.getBoolean("messages.enabled")) return;
+                if (player != null) {
+                    player.sendMessage(Component
+                            .text(config.getString("messages.-marker", "%banner% removed from BlueMap!")
+                                    .replace("%banner%", name))
+                            .color(NamedTextColor.GRAY));
+                } else {
+                    getServer().broadcast(Component
+                            .text(config.getString("messages.explode", "The %banner% banner exploded!")
+                                    .replace("%banner%", name))
+                            .color(NamedTextColor.GRAY));
                 }
             }
         });
@@ -182,20 +173,18 @@ public final class BlueMapBanners extends JavaPlugin {
 
         // Create banners save directory
         File folder = new File(getDataFolder(), "banners");
-        if (!folder.exists()) {
-            if (!folder.mkdirs()) {
-                getLogger().severe("Failed to create banners directory!");
-                return;
-            }
+        if (!folder.exists() && !folder.mkdirs()) {
+            getLogger().severe("Failed to create banners directory!");
+            return;
         }
 
         BlueMapAPI.getInstance().ifPresent(api -> {
             // For each BlueMap map, save markers to a json file.
             for (BlueMapMap map : blueMapMaps) {
-                File markerFile = new File(folder, map.getId() + ".json");
                 MarkerSet markerSet = map.getMarkerSets().get(markerSetId);
                 if (markerSet == null) continue;
 
+                File markerFile = new File(folder, map.getId() + ".json");
                 try (FileWriter writer = new FileWriter(markerFile)) {
                     MarkerGson.INSTANCE.toJson(markerSet, writer);
                 } catch (IOException ex) {
@@ -210,16 +199,20 @@ public final class BlueMapBanners extends JavaPlugin {
         getLogger().info("Loading markers...");
 
         BlueMapAPI.getInstance().ifPresent(api -> {
-            // For each BlueMap map, retrieve the marker set file if it exists then write to map marker set.
+            // Get file of each map
             for (BlueMapMap map : blueMapMaps) {
                 File markerFile = new File(getDataFolder(), "banners/" + map.getId() + ".json");
                 if (!markerFile.exists()) continue;
 
+                // Get marker set from file
                 try (FileReader reader = new FileReader(markerFile)) {
                     MarkerSet markerSet = MarkerGson.INSTANCE.fromJson(reader, MarkerSet.class);
-                    if (markerSet == null) continue;    // Skip empty marker sets
+                    if (markerSet == null) continue;
 
+                    // Apply config
                     markerSet.setDefaultHidden(config.getBoolean("markers.hidden"));
+
+                    // Apply marker set
                     map.getMarkerSets().put(markerSetId, markerSet);
                 } catch (IOException ex) {
                     // handle io-exception

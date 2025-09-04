@@ -2,6 +2,7 @@ package me.Gizzarduhh.blueMapBanners.listener;
 
 import me.Gizzarduhh.blueMapBanners.BlueMapBanners;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.block.Banner;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
@@ -21,42 +22,43 @@ public class BannerListener implements Listener {
 
     @EventHandler
     public void onBannerPlace(BlockPlaceEvent event) {
-        // Do nothing if player is sneaking
-        if (event.getPlayer().isSneaking()) return;
-
-        // Only handle Banners
-        Block block = event.getBlockPlaced();
-        if (!block.getType().name().endsWith("_BANNER")) return;
-
-        // Add banners with custom name as marker
-        String name = PlainTextComponentSerializer.plainText().serialize(event.getItemInHand().displayName());
-        name = name.substring(1, name.length() - 1); // Strip brackets from each end
-        if (event.getItemInHand().getItemMeta().hasCustomName())
-            plugin.addBannerMarker(block, name, event.getPlayer());
+        if (
+                event.getBlock().getState() instanceof Banner banner
+                && event.getItemInHand().getItemMeta().hasCustomName()
+        ) {
+            String name = PlainTextComponentSerializer.plainText().serialize(event.getItemInHand().displayName());
+            name = name.substring(1, name.length() - 1); // Strip brackets from each end
+            plugin.addBannerMarker(banner, name, event.getPlayer());
+        }
     }
 
     @EventHandler
     public void onBannerBreak(BlockBreakEvent event) {
-        Block block = event.getBlock();
         Player player = event.getPlayer();
-        if (block.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(block, player);
+        Block block = event.getBlock();
 
-        // Check Adjacent Blocks
+        // Check if banner broke
+        if (block.getState() instanceof Banner banner) {
+            plugin.removeBannerMarker(banner, player);
+        }
+
+        // Check if block broke adjacent banners
         for (BlockFace face : BlockFace.values()) {
             Block relative = block.getRelative(face);
-            if (relative.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(relative, player);
+            if (relative.getState() instanceof Banner adjBanner) plugin.removeBannerMarker(adjBanner, player);
         }
     }
 
     @EventHandler
     public void onBannerExplode(EntityExplodeEvent event) {
         for (Block block : event.blockList()) {
-            if (block.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(block, null);
+            // Check if any banners broke
+            if (block.getState() instanceof Banner banner) plugin.removeBannerMarker(banner, null);
 
-            // Check Adjacent Blocks
+            // Check if blocks broke adjacent banners
             for (BlockFace face : BlockFace.values()) {
                 Block relative = block.getRelative(face);
-                if (relative.getType().name().endsWith("_BANNER")) plugin.removeBannerMarker(relative, null);
+                if (relative.getState() instanceof Banner adjBanner) plugin.removeBannerMarker(adjBanner, null);
             }
         }
     }
