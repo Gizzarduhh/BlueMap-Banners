@@ -1,8 +1,9 @@
 package me.Gizzarduhh.blueMapBanners;
 
-import de.bluecolored.bluemap.api.AssetStorage;
+import com.google.gson.Gson;
 import de.bluecolored.bluemap.api.BlueMapAPI;
 import de.bluecolored.bluemap.api.BlueMapMap;
+import de.bluecolored.bluemap.api.BlueMapWorld;
 import de.bluecolored.bluemap.api.gson.MarkerGson;
 import de.bluecolored.bluemap.api.markers.MarkerSet;
 import de.bluecolored.bluemap.api.markers.POIMarker;
@@ -17,18 +18,19 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import javax.imageio.ImageIO;
+import java.nio.file.*;
 import java.io.*;
-import java.util.Collection;
+import java.util.HashMap;
 import java.util.Optional;
 import java.util.UUID;
 
 
 public final class BlueMapBanners extends JavaPlugin {
 
+    public static final Gson MARKER_GSON = MarkerGson.INSTANCE;
     private final NamespacedKey markerIdKey = new NamespacedKey(this,"markerId");
     private final String markerSetId = "bm-banners";
-    private Collection<BlueMapMap> blueMapMaps;
+    private HashMap<BlueMapWorld, MarkerSet> worldMarkerSets;
     private Configuration config;
 
     @Override
@@ -43,12 +45,12 @@ public final class BlueMapBanners extends JavaPlugin {
 
         // After BlueMap Enable
         BlueMapAPI.onEnable(api -> {
-            blueMapMaps = api.getMaps();
+            worldMarkerSets = new HashMap<>();
 
             reloadConfig();
             config = getConfig();
 
-            loadBannerMarkers();
+            loadBannerMarkers(api);
         });
 
         // Before BlueMap Disable
@@ -65,9 +67,9 @@ public final class BlueMapBanners extends JavaPlugin {
     public void addBannerMarker(Banner banner, String name, Player player) {
         BlueMapAPI.getInstance().ifPresent(api -> {
             // Get BlueMap map banner was placed within
-            Optional<BlueMapMap> blueMapMap = api.getMap(banner.getWorld().getName());
-            if (blueMapMap.isEmpty()) {
-                getLogger().severe("Error adding banner, " + name + ": BlueMap world not found.");
+            Optional<BlueMapWorld> blueMapWorld = api.getWorld(banner.getWorld());
+            if (blueMapWorld.isEmpty()) {
+                getLogger().severe("Error adding banner, " + name + ": BlueMap world '" + banner.getWorld().getName() + "' not found.");
                 return;
             }
 
@@ -76,15 +78,16 @@ public final class BlueMapBanners extends JavaPlugin {
             banner.getPersistentDataContainer().set(markerIdKey, PersistentDataType.STRING, markerId);
             banner.update();
 
-            // Write asset to storage if not in storage
-            AssetStorage assetStorage = blueMapMap.get().getAssetStorage();
+            // Write asset to "global" webapp storage if not already there
             String asset = "banners/" + banner.getType().name()
                     .toLowerCase()
                     .replace("_wall","") + ".png";
             try (InputStream in = getResource(asset)) {
-                if (in != null && !assetStorage.assetExists(asset)) {
-                    try (OutputStream out = assetStorage.writeAsset(asset)) {
-                        ImageIO.write(ImageIO.read(in), "png", out);
+                final Path toPath = api.getWebApp().getWebRoot().resolve("assets/" + asset);
+                if (in != null && !Files.exists(toPath)) {
+                    Files.createDirectories(toPath.getParent());
+                    try (OutputStream out = Files.newOutputStream(toPath)) {
+                        in.transferTo(out);
                     }
                 }
             } catch (IOException ex) {
@@ -100,26 +103,25 @@ public final class BlueMapBanners extends JavaPlugin {
                     .detail(config.getString("markers.detail", "%banner%\n - %player%")
                             .replace("%banner%",name)
                             .replace("%player%",player.getName()))
-                    .position(banner.getX(), banner.getY(), (double)banner.getZ())
-                    .icon(blueMapMap.get().getAssetStorage().getAssetUrl(asset),12,16)
+                    .position(banner.getX()+0.5, banner.getY()+0.5, banner.getZ()+0.5) // +0.5 to center the marker in the block
+                    .icon("assets/" + asset,12,16)
                     .maxDistance(1000)
                     .build();
 
-            // Get existing markerSet from map or create new
-            MarkerSet markerSet = blueMapMap.get().getMarkerSets().get(markerSetId);
-            if (markerSet == null) {
-                markerSet = MarkerSet.builder()
+            // Get existing markerSet from HashMap or create new
+            MarkerSet markerSet = worldMarkerSets.computeIfAbsent(blueMapWorld.get(), bmWorld -> {
+                MarkerSet newMarkerSet = MarkerSet.builder()
                         .defaultHidden(config.getBoolean("markers.hidden"))
                         .label("Banners")
                         .build();
-            }
+                // Add this new MarkerSet to all maps of this world
+                bmWorld.getMaps().forEach(bmMap -> bmMap.getMarkerSets().put(markerSetId, newMarkerSet));
+                return newMarkerSet;
+            });
 
             // Add bannerMarker to markerSet
             markerSet.getMarkers()
                     .put(markerId, bannerMarker);
-
-            // Add markerSet to map
-            blueMapMap.get().getMarkerSets().put(markerSetId, markerSet);
         });
 
         if (config.getBoolean("messages.enabled"))
@@ -178,47 +180,51 @@ public final class BlueMapBanners extends JavaPlugin {
             return;
         }
 
-        BlueMapAPI.getInstance().ifPresent(api -> {
-            // For each BlueMap map, save markers to a json file.
-            for (BlueMapMap map : blueMapMaps) {
-                MarkerSet markerSet = map.getMarkerSets().get(markerSetId);
-                if (markerSet == null) continue;
+        // For each BlueMap map, save markers to a json file.
+        worldMarkerSets.forEach((blueMapWorld, markerSet) -> {
+            if (markerSet.getMarkers().isEmpty()) return;
 
-                File markerFile = new File(folder, map.getId() + ".json");
-                try (FileWriter writer = new FileWriter(markerFile)) {
-                    MarkerGson.INSTANCE.toJson(markerSet, writer);
-                } catch (IOException ex) {
-                    // handle io-exception
-                    getLogger().severe("Unable to save markers: " + ex.getMessage());
-                }
+            File markerFile = new File(folder, blueMapWorld.getId() + ".json");
+            try (FileWriter writer = new FileWriter(markerFile)) {
+                MARKER_GSON.toJson(markerSet, writer);
+            } catch (IOException ex) {
+                // handle io-exception
+                getLogger().severe("Unable to save markers: " + ex.getMessage());
             }
         });
     }
 
-    public void loadBannerMarkers() {
+    public void loadBannerMarkers(BlueMapAPI api) {
         getLogger().info("Loading markers...");
 
-        BlueMapAPI.getInstance().ifPresent(api -> {
-            // Get file of each map
-            for (BlueMapMap map : blueMapMaps) {
-                File markerFile = new File(getDataFolder(), "banners/" + map.getId() + ".json");
-                if (!markerFile.exists()) continue;
+        // Get file of each map
+        File bannerDir = new File(getDataFolder(), "banners");
+        if (!bannerDir.exists()) return;
+        File[] markerFiles = bannerDir.listFiles();
+        if (markerFiles == null) return;
+        for (File markerFile : markerFiles) {
+            if (!markerFile.getName().endsWith(".json")) return;
 
-                // Get marker set from file
-                try (FileReader reader = new FileReader(markerFile)) {
-                    MarkerSet markerSet = MarkerGson.INSTANCE.fromJson(reader, MarkerSet.class);
-                    if (markerSet == null) continue;
+            // Get marker set from file
+            try (FileReader reader = new FileReader(markerFile)) {
+                MarkerSet markerSet = MARKER_GSON.fromJson(reader, MarkerSet.class);
+                if (markerSet == null) return;
 
-                    // Apply config
-                    markerSet.setDefaultHidden(config.getBoolean("markers.hidden"));
+                // Apply config
+                markerSet.setDefaultHidden(config.getBoolean("markers.hidden"));
 
-                    // Apply marker set
-                    map.getMarkerSets().put(markerSetId, markerSet);
-                } catch (IOException ex) {
-                    // handle io-exception
-                    getLogger().severe("Unable to load markers: " + ex.getMessage());
-                }
+                // Apply marker set to the world
+                String worldId = markerFile.getName().replaceAll("\\.json$", "");
+                Optional<BlueMapWorld> oBlueMapWorld = api.getWorld(worldId);
+                oBlueMapWorld.ifPresent(blueMapWorld -> {
+                    worldMarkerSets.put(blueMapWorld, markerSet);
+                    // Add this loaded MarkerSet to all maps of this world
+                    blueMapWorld.getMaps().forEach(blueMapMap -> blueMapMap.getMarkerSets().put(markerSetId, markerSet));
+                });
+            } catch (IOException ex) {
+                // handle io-exception
+                getLogger().severe("Unable to load markers: " + ex.getMessage());
             }
-        });
+        }
     }
 }
