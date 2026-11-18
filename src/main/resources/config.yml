@@ -7,6 +7,8 @@ markers:
   label: "%banner%"
   detail: "%banner%\n - %player%"
   hidden: false
+  maxDistance: 1000
+  minDistance: 0
 
 # Use %banner% to replace with banner name
 messages:
