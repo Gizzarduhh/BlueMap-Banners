@@ -102,7 +102,8 @@ public final class BlueMapBanners extends JavaPlugin {
                             .replace("%player%",player.getName()))
                     .position(banner.getX(), banner.getY(), (double)banner.getZ())
                     .icon(blueMapMap.get().getAssetStorage().getAssetUrl(asset),12,16)
-                    .maxDistance(1000)
+                    .maxDistance(config.getInt("markers.maxDistance", 1000))
+                    .minDistance(config.getInt("markers.minDistance", 0))
                     .build();
 
             // Get existing markerSet from map or create new
